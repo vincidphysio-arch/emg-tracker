@@ -48,7 +48,7 @@ def main():
             t = str(row.get("Type of encounter", "")).lower()
             
             if "new consult" in t: return 85.00
-            if "non cts" in t: return 65.00  # <--- This catches your specific case
+            if "non cts" in t: return 65.00
             if "follow up" in t: return 65.00
             
             return 0.00
@@ -83,5 +83,15 @@ def main():
 
             st.divider()
             
+            # TABLE
             wanted_cols = ["Date seen", "name", "Type of encounter", "Fee", "finalized report ?"]
-            final_cols = [c for c in wanted_
+            final_cols = [c for c in wanted_cols if c in monthly_df.columns]
+            
+            st.dataframe(monthly_df.sort_values(by="Date Object")[final_cols], use_container_width=True, hide_index=True)
+        else:
+            st.warning("No valid dates found.")
+    else:
+        st.info("No data found.")
+
+if __name__ == "__main__":
+    main()
