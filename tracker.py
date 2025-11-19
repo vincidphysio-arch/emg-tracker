@@ -38,35 +38,35 @@ def main():
         # 1. CLEAN DATES
         if 'name' in df.columns:
             df = df[df['name'].astype(str).str.strip() != ""]
+        
         df['Date Object'] = pd.to_datetime(df['Date seen'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Date Object'])
 
         # 2. CALC FEES
         def calc_fee(row):
+            # Convert to lowercase so "NON CTS" becomes "non cts"
             t = str(row.get("Type of encounter", "")).lower()
+            
             if "new consult" in t: return 85.00
+            if "non cts" in t: return 65.00  # <--- This catches your specific case
             if "follow up" in t: return 65.00
+            
             return 0.00
+
         df['Fee'] = df.apply(calc_fee, axis=1)
 
-        # 3. SMART MONTH SELECTOR
+        # 3. MONTH SELECTOR
         df['Month_Year'] = df['Date Object'].dt.strftime('%B %Y')
-        # Get list of months in the data, sorted newest first
         available_months = sorted(df['Month_Year'].unique(), key=lambda x: datetime.strptime(x, '%B %Y'), reverse=True)
         
         if available_months:
-            # --- LOGIC: TRY TO DEFAULT TO TODAY ---
             current_month_str = datetime.now().strftime('%B %Y')
-            
-            # If we have data for this month, make it the default index
-            default_index = 0
-            if current_month_str in available_months:
-                default_index = available_months.index(current_month_str)
+            default_index = available_months.index(current_month_str) if current_month_str in available_months else 0
             
             selected_month = st.sidebar.selectbox("Choose Month", available_months, index=default_index)
             monthly_df = df[df['Month_Year'] == selected_month]
 
-            # 4. SPLIT PERIODS
+            # 4. SPLIT PAY PERIODS
             period_1 = monthly_df[monthly_df['Date Object'].dt.day <= 15]
             period_2 = monthly_df[monthly_df['Date Object'].dt.day > 15]
 
@@ -83,14 +83,5 @@ def main():
 
             st.divider()
             
-            # TABLE
             wanted_cols = ["Date seen", "name", "Type of encounter", "Fee", "finalized report ?"]
-            final_cols = [c for c in wanted_cols if c in monthly_df.columns]
-            st.dataframe(monthly_df.sort_values(by="Date Object")[final_cols], use_container_width=True, hide_index=True)
-        else:
-            st.warning("No valid dates found.")
-    else:
-        st.info("No data found.")
-
-if __name__ == "__main__":
-    main()
+            final_cols = [c for c in wanted_
