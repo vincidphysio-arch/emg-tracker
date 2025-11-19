@@ -2,6 +2,7 @@ import streamlit as st
 import gspread
 import pandas as pd
 import json
+from datetime import datetime
 
 # --- CONFIGURATION ---
 SHEET_NAME = 'Tugolov combined questionnaire(Responses)'
@@ -11,17 +12,13 @@ CREDENTIALS_FILE = 'credentials.json'
 @st.cache_resource
 def get_data():
     try:
-        # CHECK: Are we on the Cloud?
         if "gcp_json" in st.secrets:
-            # Read the key from the Cloud Secrets
             creds_dict = json.loads(st.secrets["gcp_json"])
             gc = gspread.service_account_from_dict(creds_dict)
         else:
-            # Read the key from your local computer
             gc = gspread.service_account(filename=CREDENTIALS_FILE)
             
         sh = gc.open(SHEET_NAME)
-        # Get the first tab (Index 0)
         worksheet = sh.get_worksheet(0) 
         return worksheet.get_all_records()
     except Exception as e:
@@ -32,21 +29,19 @@ def get_data():
 def main():
     st.set_page_config(page_title="EMG Dashboard", layout="wide")
     
-    # Load data
     data = get_data()
     df = pd.DataFrame(data)
 
-    # Side Bar for Month Selection
     st.sidebar.header("📅 Select Pay Period")
     
     if not df.empty:
-        # 1. CLEAN & PREPARE DATES
+        # 1. CLEAN DATES
         if 'name' in df.columns:
             df = df[df['name'].astype(str).str.strip() != ""]
         df['Date Object'] = pd.to_datetime(df['Date seen'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Date Object'])
 
-        # 2. CALCULATE FEES
+        # 2. CALC FEES
         def calc_fee(row):
             t = str(row.get("Type of encounter", "")).lower()
             if "new consult" in t: return 85.00
@@ -54,16 +49,24 @@ def main():
             return 0.00
         df['Fee'] = df.apply(calc_fee, axis=1)
 
-        # 3. MONTH FILTER
+        # 3. SMART MONTH SELECTOR
         df['Month_Year'] = df['Date Object'].dt.strftime('%B %Y')
-        available_months = sorted(df['Month_Year'].unique(), reverse=True)
+        # Get list of months in the data, sorted newest first
+        available_months = sorted(df['Month_Year'].unique(), key=lambda x: datetime.strptime(x, '%B %Y'), reverse=True)
         
-        # Handle case where no months exist yet
         if available_months:
-            selected_month = st.sidebar.selectbox("Choose Month", available_months)
+            # --- LOGIC: TRY TO DEFAULT TO TODAY ---
+            current_month_str = datetime.now().strftime('%B %Y')
+            
+            # If we have data for this month, make it the default index
+            default_index = 0
+            if current_month_str in available_months:
+                default_index = available_months.index(current_month_str)
+            
+            selected_month = st.sidebar.selectbox("Choose Month", available_months, index=default_index)
             monthly_df = df[df['Month_Year'] == selected_month]
 
-            # 4. SPLIT PAY PERIODS
+            # 4. SPLIT PERIODS
             period_1 = monthly_df[monthly_df['Date Object'].dt.day <= 15]
             period_2 = monthly_df[monthly_df['Date Object'].dt.day > 15]
 
@@ -72,7 +75,6 @@ def main():
             with col2: 
                 if st.button("🔄 REFRESH"): st.rerun()
 
-            # METRICS
             st.markdown("### 💸 Paycheck Breakdown")
             m1, m2, m3 = st.columns(3)
             m1.metric("🗓️ 1st - 15th", f"${period_1['Fee'].sum():,.2f}", f"{len(period_1)} patients")
@@ -80,15 +82,15 @@ def main():
             m3.metric("💰 Month Total", f"${monthly_df['Fee'].sum():,.2f}", "Gross Income")
 
             st.divider()
-            st.subheader(f"Patient Log ({selected_month})")
             
+            # TABLE
             wanted_cols = ["Date seen", "name", "Type of encounter", "Fee", "finalized report ?"]
             final_cols = [c for c in wanted_cols if c in monthly_df.columns]
             st.dataframe(monthly_df.sort_values(by="Date Object")[final_cols], use_container_width=True, hide_index=True)
         else:
-            st.warning("No valid dates found in the sheet.")
+            st.warning("No valid dates found.")
     else:
-        st.info("Connected to sheet, but no data found yet.")
+        st.info("No data found.")
 
 if __name__ == "__main__":
     main()
