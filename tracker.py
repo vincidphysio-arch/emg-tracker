@@ -9,7 +9,6 @@ SHEET_NAME = 'Tugolov combined questionnaire(Responses)'
 CREDENTIALS_FILE = 'credentials.json'
 
 # --- CONNECT TO GOOGLE ---
-# 1. We cache the CONNECTION so we don't log in every time (Fast)
 @st.cache_resource
 def get_connection():
     try:
@@ -23,7 +22,6 @@ def get_connection():
         st.error(f"❌ Error: {e}")
         st.stop()
 
-# 2. We DO NOT cache the data, so it updates instantly
 def get_data():
     gc = get_connection()
     sh = gc.open(SHEET_NAME)
@@ -34,7 +32,6 @@ def get_data():
 def main():
     st.set_page_config(page_title="EMG Dashboard", layout="wide")
     
-    # Button to force reload
     if st.sidebar.button("🔄 FORCE REFRESH DATA"):
         st.cache_data.clear()
         st.rerun()
@@ -45,20 +42,15 @@ def main():
     st.title("📊 Live EMG Earnings")
 
     if not df.empty:
-        # 1. CLEAN DATES
+        # 1. CLEAN DATES (USING TIMESTAMP NOW)
         if 'name' in df.columns:
             df = df[df['name'].astype(str).str.strip() != ""]
         
-        # Convert dates
-        df['Date Object'] = pd.to_datetime(df['Date seen'], dayfirst=True, errors='coerce')
+        # Convert Timestamp column to real datetime objects
+        # Google Sheets timestamps are usually DD/MM/YYYY HH:MM:SS
+        df['Date Object'] = pd.to_datetime(df['Timestamp'], dayfirst=True, errors='coerce')
         
-        # WARNING SYSTEM: Check for missing dates
-        missing_dates = df[df['Date Object'].isna()]
-        if not missing_dates.empty:
-            st.warning(f"⚠️ Warning: {len(missing_dates)} patients have a missing or broken 'Date seen'. They are hidden.")
-            with st.expander("See patients with missing dates"):
-                st.dataframe(missing_dates)
-
+        # Check for missing timestamps
         df = df.dropna(subset=['Date Object'])
 
         # 2. CALC FEES
@@ -71,7 +63,7 @@ def main():
 
         df['Fee'] = df.apply(calc_fee, axis=1)
 
-        # 3. MONTH SELECTOR
+        # 3. MONTH SELECTOR (Based on Timestamp)
         df['Month_Year'] = df['Date Object'].dt.strftime('%B %Y')
         available_months = sorted(df['Month_Year'].unique(), key=lambda x: datetime.strptime(x, '%B %Y'), reverse=True)
         
@@ -86,7 +78,7 @@ def main():
             period_1 = monthly_df[monthly_df['Date Object'].dt.day <= 15]
             period_2 = monthly_df[monthly_df['Date Object'].dt.day > 15]
 
-            st.markdown(f"### 📅 {selected_month}")
+            st.markdown(f"### 📅 Earnings for {selected_month}")
             
             m1, m2, m3 = st.columns(3)
             m1.metric("🗓️ 1st - 15th", f"${period_1['Fee'].sum():,.2f}", f"{len(period_1)} patients")
@@ -96,12 +88,13 @@ def main():
             st.divider()
             
             # TABLE
-            wanted_cols = ["Date seen", "name", "Type of encounter", "Fee", "finalized report ?"]
+            # We show Timestamp first now
+            wanted_cols = ["Timestamp", "name", "Type of encounter", "Fee", "finalized report ?"]
             final_cols = [c for c in wanted_cols if c in monthly_df.columns]
             
             st.dataframe(monthly_df.sort_values(by="Date Object", ascending=False)[final_cols], use_container_width=True, hide_index=True)
         else:
-            st.warning("No valid dates found.")
+            st.warning("No valid timestamps found.")
     else:
         st.info("No data found.")
 
